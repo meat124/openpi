@@ -28,7 +28,7 @@ from openpi.models import model as _model
 def make_rby1_example() -> dict:
     """Creates a random input example for the RBY1 policy."""
     return {
-        "observation/state": np.random.randn(24).astype(np.float32),
+        "observation/state": np.random.randn(16).astype(np.float32), # 14 Dofs + 2 Grippers
         "observation/head_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/left_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/right_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
@@ -123,6 +123,6 @@ class Rby1Outputs(transforms.DataTransformFn):
         # Only return the first N actions -- since we padded actions above to fit the model action
         # dimension, we need to now parse out the correct number of actions in the return dict.
         # For RBY1, we only return the first 24 actions (since the rest is padding).
-        # For your own dataset, replace `24` with the action dimension of your dataset.
-        return {"actions": data["actions"][:, :24]}
+        # For your own dataset, replace `16` with the action dimension of your dataset.
+        return {"actions": data["actions"][:, :16]}
 
