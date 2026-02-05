@@ -20,6 +20,7 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.rby1_policy as rby1_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -353,6 +354,39 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
+        
+@dataclasses.dataclass(frozen=True)
+class LeRobotRby1DataConfig(DataConfigFactory):
+    repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/head_image": "image", # TODO : dataset에 맞게 고칠 것
+                        "observation/left_wrist_image": "left_wrist_image", # TODO : dataset에 맞게 고칠 것
+                        "observation/right_wrist_image": "right_wrist_image", # TODO : dataset에 맞게 고칠 것
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        data_transforms = _transforms.Group(
+            inputs=[rby1_policy.Rby1Inputs()],
+            outputs=[rby1_policy.Rby1Outputs()],
+        )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=self.repack_transforms,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -558,6 +592,13 @@ class TrainConfig:
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    TrainConfig(
+        name="pi05_rby1",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotRby1DataConfig(
+            assets=AssetsConfig(asset_id="rby1"),
+        ),
+    ),
     #
     # Inference Aloha configs.
     #
