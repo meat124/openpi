@@ -357,28 +357,43 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         
 @dataclasses.dataclass(frozen=True)
 class LeRobotRby1DataConfig(DataConfigFactory):
-    repack_transform = _transforms.Group(
-            inputs=[
-                _transforms.RepackTransform(
-                    {
-                        "observation/head_image": "image", # TODO : dataset에 맞게 고칠 것
-                        "observation/left_wrist_image": "left_wrist_image", # TODO : dataset에 맞게 고칠 것
-                        "observation/right_wrist_image": "right_wrist_image", # TODO : dataset에 맞게 고칠 것
-                        "observation/state": "state",
-                        "actions": "actions",
-                        "prompt": "prompt",
-                    }
-                )
-            ]
-        )
+    """Example data config for an RBY1 dataset in LeRobot format.
+
+    This config mirrors the pattern used by `LeRobotLiberoDataConfig`:
+    - `repack_transforms` renames dataset keys to the *inference-time* keys expected by `rby1_policy.Rby1Inputs`.
+    - `data_transforms` converts those keys into the model's common input format (images/state/prompt).
+
+    You must update the repack mapping to match your dataset schema.
+    """
+
+    # Action keys that will be used to read the action sequence from the dataset.
+    action_sequence_keys: Sequence[str] = ("actions",)
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # Repack transforms: dataset keys -> inference keys.
+        # TODO: Update these paths to match your dataset.
+        repack_transforms = _transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "observation/head_image": "image", # TODO : dataset에 맞게 고칠 것
+                            "observation/left_wrist_image": "left_wrist_image", # TODO : dataset에 맞게 고칠 것
+                            "observation/right_wrist_image": "right_wrist_image", # TODO : dataset에 맞게 고칠 것
+                            "observation/state": "state",
+                            "actions": "actions",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            )
+        
         data_transforms = _transforms.Group(
-            inputs=[rby1_policy.Rby1Inputs()],
+            inputs=[rby1_policy.Rby1Inputs(model_type=model_config.model_type)],
             outputs=[rby1_policy.Rby1Outputs()],
         )
 
-        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+        model_transforms = ModelTransformFactory()(model_config)
 
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
