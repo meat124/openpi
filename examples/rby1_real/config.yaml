@@ -1,0 +1,34 @@
+# connection 
+user_pc_ip: "192.168.0.50:50051" # user pc
+
+remote_gripper_host: "192.168.0.56"
+remote_gripper_port: 5009
+remote_gripper_timeout: 10
+
+cameras:
+  head:
+    namespace: "camera"
+    serial: "922612070040"
+    color: "/camera/camera/color/image_raw"
+    depth: "/camera/camera/depth/image_rect_raw"
+  right:
+    namespace: "camera3"
+    serial: "838212074317"
+    color: "/camera3/camera/color/image_raw"
+    depth: "/camera3/camera/depth/image_rect_raw"
+  left:
+    namespace: "camera2"
+    serial: "838212070714"
+    color: "/camera2/camera/color/image_raw"
+    depth: "/camera2/camera/depth/image_rect_raw"
+
+cam_node_num: 3
+
+img_size:
+  width: 640
+  height: 480
+# camera model & serial number
+# command: rs-enumerate-devices -s
+# Head RealSense  D435          922612070040
+# Right RealSense D435I         838212074317
+# Left RealSense  D435I         838212070714
