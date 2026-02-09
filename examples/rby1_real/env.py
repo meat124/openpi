@@ -340,11 +340,11 @@ class RBY1Environment(_environment.Environment):
                 action_vec.size,
             )
             mid = action_vec.size // 2
-            left_action = action_vec[:mid]
-            right_action = action_vec[mid:]
+            right_action = action_vec[:mid]
+            left_action = action_vec[mid:]
         else:
-            left_action = action_vec[: self._left_action_dim]
-            right_action = action_vec[self._left_action_dim : expected]
+            right_action = action_vec[: self._right_action_dim]
+            left_action = action_vec[self._right_action_dim : expected]
 
         self._send_joint_positions(left_action, right_action)
 
