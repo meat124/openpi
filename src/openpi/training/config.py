@@ -377,7 +377,7 @@ class LeRobotRby1DataConfig(DataConfigFactory):
                 inputs=[
                     _transforms.RepackTransform(
                         {
-                            "observation/head_image": "image", # TODO : dataset에 맞게 고칠 것
+                            "observation/head_image": "head_image", # TODO : dataset에 맞게 고칠 것
                             "observation/left_wrist_image": "left_wrist_image", # TODO : dataset에 맞게 고칠 것
                             "observation/right_wrist_image": "right_wrist_image", # TODO : dataset에 맞게 고칠 것
                             "observation/state": "state",
@@ -397,7 +397,7 @@ class LeRobotRby1DataConfig(DataConfigFactory):
 
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
-            repack_transforms=self.repack_transforms,
+            repack_transforms=repack_transforms,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=self.action_sequence_keys,
@@ -567,7 +567,7 @@ class TrainConfig:
     keep_period: int | None = 5000
 
     # If true, will overwrite the checkpoint directory if it already exists.
-    overwrite: bool = False
+    overwrite: bool = True
     # If true, will resume training from the last checkpoint.
     resume: bool = False
 
@@ -581,7 +581,7 @@ class TrainConfig:
     # device memory will be reduced but training could potentially be slower.
     # eg. if total device is 4 and fsdp devices is 2; then the model will shard to 2 devices and run
     # data parallel between 2 groups of devices.
-    fsdp_devices: int = 1
+    fsdp_devices: int = 2
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -609,10 +609,17 @@ class TrainConfig:
 _CONFIGS = [
     TrainConfig(
         name="pi05_rby1",
-        model=pi0_config.Pi0Config(pi05=True),
+        model=pi0_config.Pi0Config(pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         data=LeRobotRby1DataConfig(
+            repo_id="edipark/Sample_v2",
             assets=AssetsConfig(asset_id="rby1"),
         ),
+        save_interval=100,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA finetuning.
+        ema_decay=None,
     ),
     #
     # Inference Aloha configs.

@@ -37,12 +37,40 @@ def make_rby1_example() -> dict:
 
 
 def _parse_image(image) -> np.ndarray:
-    """Normalize image into uint8 HWC."""
+    """Normalize an image into uint8 HWC (3 channels).
+
+    This is the right place to fix dtype issues without touching core training/model code:
+    LeRobot/HF datasets may yield nested Python lists, which become int64 when converted to numpy.
+    We always convert integer images to uint8 here so `Observation.from_dict()` can handle them.
+    """
     image = np.asarray(image)
+
+    # dtype -> uint8
     if np.issubdtype(image.dtype, np.floating):
-        image = (255 * image).astype(np.uint8)
-    if image.shape[0] != 3:
-        image = einops.rearrange(image, "c h w -> h w c")
+        image = np.clip(image, 0.0, 1.0)
+        image = (255.0 * image).astype(np.uint8)
+    elif image.dtype != np.uint8:
+        image = np.clip(image, 0, 255).astype(np.uint8)
+
+    # shape -> HWC
+    if image.ndim == 2:
+        image = image[:, :, None]  # HW -> HWC
+    elif image.ndim == 3:
+        if image.shape[-1] in (1, 3, 4):
+            pass  # already HWC
+        elif image.shape[0] in (1, 3, 4):
+            image = einops.rearrange(image, "c h w -> h w c")  # CHW -> HWC
+        else:
+            raise ValueError(f"Unsupported image shape {image.shape}; expected HWC or CHW with 1/3/4 channels.")
+    else:
+        raise ValueError(f"Unsupported image ndim={image.ndim}, shape={image.shape}.")
+
+    # channels -> 3
+    if image.shape[-1] == 1:
+        image = np.repeat(image, 3, axis=-1)
+    elif image.shape[-1] == 4:
+        image = image[..., :3]
+
     return image
 
 
@@ -75,20 +103,21 @@ class Rby1Inputs(transforms.DataTransformFn):
         right_wrist_image = _parse_image(data["observation/right_wrist_image"])
 
         # pi0 family currently standardizes on three image keys.
+        
         images = {
-            "head_0_rgb": head_image,
+            "base_0_rgb": head_image,
             "left_wrist_0_rgb": left_wrist_image,
             # If you have a right wrist cam on rby1, replace this with it.
             "right_wrist_0_rgb": right_wrist_image,
         }
 
         image_masks = {
-            "head_0_rgb": np.True_,
+            "base_0_rgb": np.True_,
             "left_wrist_0_rgb": np.True_,
             "right_wrist_0_rgb": np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_,
         }
 
-        state = np.asarray(data["observation/state"], dtype=np.float32)
+        state = np.asarray(data["observation/state"])
         if state.ndim != 1:
             raise ValueError(f"Expected 1D state vector, got shape={state.shape}")
 
