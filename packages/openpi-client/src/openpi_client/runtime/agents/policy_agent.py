@@ -12,6 +12,7 @@ class PolicyAgent(_agent.Agent):
 
     @override
     def get_action(self, observation: dict) -> dict:
+        print(observation.keys())
         return self._policy.infer(observation)
 
     def reset(self) -> None:

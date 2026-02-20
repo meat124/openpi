@@ -67,11 +67,13 @@ class _RealsenseCamera:
                     pass  # Pipeline wasn't running
                 
                 self._pipeline.start(self._config)
-                self._started = True
                 
                 # Warmup: discard initial frames for stable image quality
                 for _ in range(30):
                     self._pipeline.wait_for_frames(timeout_ms=1000)
+
+                self._started = True
+
                     
             except Exception as e:
                 logger.warning("Camera start/warmup failed for %s: %s", self._serial, e)
@@ -111,7 +113,14 @@ class _RealsenseCamera:
                     max_retries,
                     exc,
                 )
-                if attempt == max_retries - 1:
+                if attempt < max_retries - 1:
+                    self._started = False
+                    try:
+                        self._pipeline.stop()
+                    except RuntimeError:
+                        pass
+                    self.start()
+                else:
                     raise
 
         raise RuntimeError("Failed to get image after retries")
@@ -160,19 +169,19 @@ class RBY1Environment(_environment.Environment):
 
         # Initialize cameras
         self._cameras: Dict[str, _RealsenseCamera] = {
-            "cam_head": _RealsenseCamera(
+            "observation/head_image": _RealsenseCamera(
                 serial=cam_head_serial,
                 width=camera_width,
                 height=camera_height,
                 fps=camera_fps,
             ),
-            "cam_left_wrist": _RealsenseCamera(
+            "observation/left_wrist_image": _RealsenseCamera(
                 serial=cam_left_serial,
                 width=camera_width,
                 height=camera_height,
                 fps=camera_fps,
             ),
-            "cam_right_wrist": _RealsenseCamera(
+            "observation/right_wrist_image": _RealsenseCamera(
                 serial=cam_right_serial,
                 width=camera_width,
                 height=camera_height,
@@ -255,20 +264,19 @@ class RBY1Environment(_environment.Environment):
     @override
     def get_observation(self) -> dict:
         # Capture images from all cameras
-        images = {}
+        observation = {}
         for name, camera in self._cameras.items():
             raw_img = camera.get_rgb_image()
             resized = image_tools.resize_with_pad(raw_img, self._render_height, self._render_width)
             resized = image_tools.convert_to_uint8(resized)
-            images[name] = einops.rearrange(resized, "h w c -> c h w")
+            observation[name] = einops.rearrange(resized, "h w c -> c h w")
         
         robot_qpos = self._get_joint_positions()
+
+        observation["observation/state"] = robot_qpos
+        observation["prompt"] = self._prompt
         
-        return {
-            "images": images,
-            "state": robot_qpos,
-            "prompt": self._prompt,
-        }
+        return observation
 
     def _get_joint_positions(self) -> np.ndarray:
         """Get 16-dim state: 14 arm joints + 2 gripper values."""
@@ -379,12 +387,12 @@ class RBY1Environment(_environment.Environment):
                     rby.BodyComponentBasedCommandBuilder()
                     .set_right_arm_command(
                         rby.JointPositionCommandBuilder()
-                        .set_position(np.zeros(7))
+                        .set_position(0.1 * right_arm)  # Scale down for safety
                         .set_minimum_time(minimum_time)
                     )
                     .set_left_arm_command(
                         rby.JointPositionCommandBuilder()
-                        .set_position(np.zeros(7))
+                        .set_position(0.1 * left_arm)  # Scale down for safety
                         .set_minimum_time(minimum_time)
                     )
                 )
