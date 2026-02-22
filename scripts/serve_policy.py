@@ -76,7 +76,7 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     ),
     EnvMode.RBY1: Checkpoint(
         config="pi05_rby1",
-        dir="/home/hyunjin/rby1_ws/openpi/checkpoints/pi05_rby1/pi05_rby1_test/200",
+        dir="/home/hyunjin/rby1_ws/openpi/checkpoints/pi05_rby1/PuttingCupintotheDishV2/29999",  # TODO
     ),
 }
 

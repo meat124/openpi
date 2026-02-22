@@ -611,7 +611,7 @@ _CONFIGS = [
         name="pi05_rby1",
         model=pi0_config.Pi0Config(pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         data=LeRobotRby1DataConfig(
-            repo_id="edipark/Sample_v2",
+            repo_id="edipark/PuttingCupintotheDishV2",  # TODO
             assets=AssetsConfig(asset_id="rby1"),
         ),
         save_interval=100,
