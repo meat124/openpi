@@ -555,7 +555,7 @@ class TrainConfig:
     batch_size: int = 32
     # Number of workers to use for the data loader. Increasing this number will speed up data loading but
     # will increase memory and CPU usage.
-    num_workers: int = 2
+    num_workers: int = 4
     # Number of train steps (batches) to run.
     num_train_steps: int = 30_000
 
@@ -614,6 +614,7 @@ _CONFIGS = [
             repo_id="edipark/PuttingCupintotheDishV2",  # TODO
             assets=AssetsConfig(asset_id="rby1"),
         ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         save_interval=100,
         freeze_filter=pi0_config.Pi0Config(
             paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
