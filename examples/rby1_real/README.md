@@ -28,7 +28,7 @@ python examples/rby1_real/main.py \
 
 ## Notes
 - Images are resized to 224x224 and sent as uint8.
-- The observation uses camera keys: cam_head, cam_left_wrist, cam_right_wrist.
+- The observation uses camera keys: observation/head_image, observation/left_wrist_image, observation/right_wrist_image.
 - If the model expects cam_low, add a dummy image or update transforms accordingly.
 - If your rby1_sdk API differs, update env.py:
   - _create_robot()

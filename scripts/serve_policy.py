@@ -103,7 +103,28 @@ def create_policy(args: Args) -> _policy.Policy:
 
 def main(args: Args) -> None:
     policy = create_policy(args)
-    policy_metadata = policy.metadata
+    policy_metadata = dict(policy.metadata or {})
+
+    # Add explicit source info so websocket clients can verify which checkpoint is served.
+    if isinstance(args.policy, Checkpoint):
+        served_checkpoint = args.policy
+        policy_loader = "explicit_checkpoint"
+    else:
+        served_checkpoint = DEFAULT_CHECKPOINT[args.env]
+        policy_loader = "default_for_env"
+
+    policy_metadata.setdefault("served_env", args.env.value)
+    policy_metadata.setdefault("policy_loader", policy_loader)
+    policy_metadata.setdefault("checkpoint_config", served_checkpoint.config)
+    policy_metadata.setdefault("checkpoint_dir", served_checkpoint.dir)
+
+    logging.info(
+        "Serving policy: env=%s loader=%s config=%s checkpoint_dir=%s",
+        args.env.value,
+        policy_loader,
+        served_checkpoint.config,
+        served_checkpoint.dir,
+    )
 
     # Record the policy's behavior.
     if args.record:

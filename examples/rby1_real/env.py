@@ -59,6 +59,22 @@ class _RealsenseCamera:
     def start(self) -> None:
         if not self._started:
             logger.info("Starting camera %s...", self._serial)
+            connected_serials = []
+            try:
+                ctx = rs.context()
+                for dev in ctx.query_devices():
+                    try:
+                        connected_serials.append(dev.get_info(rs.camera_info.serial_number))
+                    except Exception:
+                        continue
+            except Exception:
+                connected_serials = []
+
+            if self._serial is not None and connected_serials and self._serial not in connected_serials:
+                raise RuntimeError(
+                    f"Camera serial {self._serial} not found. Connected RealSense serials: {connected_serials}"
+                )
+
             try:
                 # Stop any existing pipeline before starting
                 try:
@@ -83,6 +99,7 @@ class _RealsenseCamera:
                     self._pipeline.stop()
                 except RuntimeError:
                     pass
+                raise RuntimeError(f"Failed to start camera {self._serial}: {e}") from e
 
     def stop(self) -> None:
         if self._started:
@@ -97,6 +114,8 @@ class _RealsenseCamera:
     def get_rgb_image(self) -> np.ndarray:
         if not self._started:
             self.start()
+        if not self._started:
+            raise RuntimeError(f"Camera {self._serial} is not started")
 
         max_retries = 3
         for attempt in range(max_retries):
@@ -113,6 +132,8 @@ class _RealsenseCamera:
                     max_retries,
                     exc,
                 )
+                if "cannot be called before start" in str(exc).lower():
+                    raise RuntimeError(f"Camera {self._serial} is not running. start() failed earlier.") from exc
                 if attempt < max_retries - 1:
                     self._started = False
                     try:
@@ -148,6 +169,10 @@ class RBY1Environment(_environment.Environment):
         cam_right_serial: Optional[str] = None,
         left_action_dim: int = 8,  # 7 joints + 1 gripper
         right_action_dim: int = 8,  # 7 joints + 1 gripper
+        arm_command_priority: int = 1,
+        arm_action_scale: float = 1.0,
+        arm_minimum_time: float = 0.1,
+        log_action_send: bool = False,
         state_source: str = "robot",
         state_zmq_address: Optional[str] = None,
         state_indices: Optional[Sequence[int]] = None,
@@ -161,11 +186,22 @@ class RBY1Environment(_environment.Environment):
         self._render_width = render_width
         self._left_action_dim = left_action_dim
         self._right_action_dim = right_action_dim
+        self._arm_command_priority = int(arm_command_priority)
+        self._arm_action_scale = arm_action_scale
+        self._arm_minimum_time = arm_minimum_time
+        self._log_action_send = bool(log_action_send)
         self._state_source = state_source
         self._state_indices = np.asarray(state_indices, dtype=int) if state_indices is not None else None
         self._gripper_state_key = gripper_state_key
         self._use_remote_gripper = use_remote_gripper
         self._gripper = gripper
+
+        if self._arm_action_scale <= 0:
+            raise ValueError("arm_action_scale must be > 0")
+        if self._arm_minimum_time <= 0:
+            raise ValueError("arm_minimum_time must be > 0")
+        if self._arm_command_priority < 0:
+            raise ValueError("arm_command_priority must be >= 0")
 
         # Initialize cameras
         self._cameras: Dict[str, _RealsenseCamera] = {
@@ -205,6 +241,9 @@ class RBY1Environment(_environment.Environment):
             logger.info("Robot connected successfully")
         else:
             raise RuntimeError("Failed to connect to robot")
+
+        # Ensure robot is ready to accept motion commands.
+        self._prepare_robot_for_control()
 
         # Setup ZMQ socket if using external state source
         self._state_socket = None
@@ -251,6 +290,40 @@ class RBY1Environment(_environment.Environment):
         if hasattr(rby, "create_robot"):
             return rby.create_robot(robot_ip, "a")
         raise RuntimeError("Unable to construct RBY1 robot client from rby1_sdk.")
+
+    def _prepare_robot_for_control(self) -> None:
+        """Power/servo/control-manager initialization with best-effort recovery."""
+        try:
+            if hasattr(self._robot, "power_on"):
+                self._robot.power_on(".*")
+            if hasattr(self._robot, "servo_on"):
+                self._robot.servo_on(".*")
+
+            # Recover faulted control manager if needed.
+            if hasattr(self._robot, "get_control_manager_state") and hasattr(self._robot, "reset_fault_control_manager"):
+                cm_state = self._robot.get_control_manager_state().state
+                major = getattr(getattr(rby, "ControlManagerState", None), "State", None)
+                if major is not None:
+                    fault_states = {getattr(major, "MajorFault", None), getattr(major, "MinorFault", None)}
+                    if cm_state in fault_states:
+                        logger.warning("Control manager fault detected. Trying reset...")
+                        self._robot.reset_fault_control_manager()
+
+            if hasattr(self._robot, "enable_control_manager"):
+                self._robot.enable_control_manager()
+
+            if hasattr(self._robot, "cancel_control"):
+                try:
+                    self._robot.cancel_control()
+                except Exception:
+                    pass
+
+            if hasattr(self._robot, "wait_for_control_ready"):
+                self._robot.wait_for_control_ready(1000)
+
+            logger.info("Robot control manager prepared.")
+        except Exception as exc:
+            logger.warning("Failed to fully prepare robot control manager: %s", exc)
 
     @override
     def reset(self) -> None:
@@ -340,26 +413,25 @@ class RBY1Environment(_environment.Environment):
 
         action_vec = np.asarray(action["actions"], dtype=np.float32).reshape(-1)
         expected = self._left_action_dim + self._right_action_dim
-        
+
         if action_vec.size != expected:
-            logger.warning(
-                "Action dimension mismatch (expected %s, got %s). Splitting in half",
-                expected,
-                action_vec.size,
-            )
-            mid = action_vec.size // 2
-            right_action = action_vec[:mid]
-            left_action = action_vec[mid:]
-        else:
-            right_action = action_vec[: self._right_action_dim]
-            left_action = action_vec[self._right_action_dim : expected]
+            raise ValueError(f"Action dimension mismatch (expected {expected}, got {action_vec.size})")
+
+        right_action = action_vec[: self._right_action_dim]
+        left_action = action_vec[self._right_action_dim : expected]
 
         self._send_joint_positions(left_action, right_action)
 
     def _send_joint_positions(self, left_action: np.ndarray, right_action: np.ndarray) -> None:
         """Send arm and gripper commands to robot."""
         logger.debug("Sending left: %s, right: %s", left_action, right_action)
-        minimum_time = 5
+
+        q_before = None
+        if self._log_action_send and hasattr(self._robot, "get_state"):
+            try:
+                q_before = np.asarray(self._robot.get_state().position, dtype=np.float64)[8:22].copy()
+            except Exception:
+                q_before = None
 
         # Split arm (first 7) and gripper (8th element) commands
         left_arm = left_action[:7] if left_action.size >= 7 else left_action
@@ -380,27 +452,99 @@ class RBY1Environment(_environment.Environment):
             except Exception as exc:
                 logger.warning("Failed to send gripper command: %s", exc)
 
-        # Send arm commands (currently sending zero pose for safety)
-        self._robot.send_command(
+        # Send arm commands
+        rv = self._robot.send_command(
             rby.RobotCommandBuilder().set_command(
                 rby.ComponentBasedCommandBuilder().set_body_command(
                     rby.BodyComponentBasedCommandBuilder()
                     .set_right_arm_command(
                         rby.JointPositionCommandBuilder()
-                        .set_position(0.1 * right_arm)  # Scale down for safety
-                        .set_minimum_time(minimum_time)
+                        .set_command_header(rby.CommandHeaderBuilder().set_control_hold_time(max(0.2, self._arm_minimum_time)))
+                        .set_position(self._arm_action_scale * right_arm)
+                        .set_minimum_time(self._arm_minimum_time)
                     )
                     .set_left_arm_command(
                         rby.JointPositionCommandBuilder()
-                        .set_position(0.1 * left_arm)  # Scale down for safety
-                        .set_minimum_time(minimum_time)
+                        .set_command_header(rby.CommandHeaderBuilder().set_control_hold_time(max(0.2, self._arm_minimum_time)))
+                        .set_position(self._arm_action_scale * left_arm)
+                        .set_minimum_time(self._arm_minimum_time)
                     )
                 )
             ),
-            1,
+            self._arm_command_priority,
         ).get()
+
+        finish_code = getattr(rv, "finish_code", None)
+        finish_enum = getattr(getattr(rby, "RobotCommandFeedback", None), "FinishCode", None)
+        if self._log_action_send:
+            logger.info(
+                "[send] priority=%s left_norm=%.4f right_norm=%.4f finish_code=%s",
+                self._arm_command_priority,
+                float(np.linalg.norm(left_arm)),
+                float(np.linalg.norm(right_arm)),
+                finish_code,
+            )
+        if finish_enum is not None and finish_code is not None and finish_code != finish_enum.Ok:
+            logger.warning("Robot arm command finish_code=%s", finish_code)
+
+            # Auto-recovery path when control manager is idle.
+            if finish_code == getattr(finish_enum, "ControlManagerIdle", None):
+                logger.warning("Control manager idle. Re-preparing robot and retrying command once...")
+                self._prepare_robot_for_control()
+                rv_retry = self._robot.send_command(
+                    rby.RobotCommandBuilder().set_command(
+                        rby.ComponentBasedCommandBuilder().set_body_command(
+                            rby.BodyComponentBasedCommandBuilder()
+                            .set_right_arm_command(
+                                rby.JointPositionCommandBuilder()
+                                .set_command_header(rby.CommandHeaderBuilder().set_control_hold_time(max(0.2, self._arm_minimum_time)))
+                                .set_position(self._arm_action_scale * right_arm)
+                                .set_minimum_time(self._arm_minimum_time)
+                            )
+                            .set_left_arm_command(
+                                rby.JointPositionCommandBuilder()
+                                .set_command_header(rby.CommandHeaderBuilder().set_control_hold_time(max(0.2, self._arm_minimum_time)))
+                                .set_position(self._arm_action_scale * left_arm)
+                                .set_minimum_time(self._arm_minimum_time)
+                            )
+                        )
+                    ),
+                    self._arm_command_priority,
+                ).get()
+                retry_code = getattr(rv_retry, "finish_code", None)
+                if finish_enum is not None and retry_code is not None and retry_code != finish_enum.Ok:
+                    logger.warning("Retry arm command failed: finish_code=%s", retry_code)
+
+        if self._log_action_send and q_before is not None and hasattr(self._robot, "get_state"):
+            try:
+                time_wait = max(0.02, min(0.2, float(self._arm_minimum_time)))
+                import time
+                time.sleep(time_wait)
+                q_after = np.asarray(self._robot.get_state().position, dtype=np.float64)[8:22].copy()
+                dq = q_after - q_before
+                logger.info(
+                    "[send] q_delta_norm=%.6f q_before[0]=%.4f q_after[0]=%.4f",
+                    float(np.linalg.norm(dq)),
+                    float(q_before[0]),
+                    float(q_after[0]),
+                )
+            except Exception as exc:
+                logger.warning("[send] failed to read q after command: %s", exc)
+
         logger.debug("Commands sent to robot")
 
     def close(self) -> None:
+        if self._gripper is not None:
+            try:
+                self._gripper.stop()
+            except Exception as exc:
+                logger.warning("Failed to stop gripper cleanly: %s", exc)
+
+        if hasattr(self._robot, "disconnect"):
+            try:
+                self._robot.disconnect()
+            except Exception as exc:
+                logger.warning("Failed to disconnect robot cleanly: %s", exc)
+
         for camera in self._cameras.values():
             camera.stop()

@@ -1,7 +1,7 @@
 """RBY1 robot control via OpenPI policy server.
 
 Usage:
-    python main.py --args.robot-ip "localhost:50051" --args.prompt "pick up the cup"
+    python examples/rby1_real/main.py --robot-ip 192.168.0.10 --prompt "pick up the cup"
 """
 import dataclasses
 import logging
@@ -21,7 +21,8 @@ class Args:
     # Policy server
     host: str = "localhost"
     port: int = 8000
-    action_horizon: int = 25
+    # If None, uses action_horizon from server metadata when available.
+    action_horizon: int | None = None
 
     # Episode settings
     num_episodes: int = 1
@@ -47,6 +48,9 @@ class Args:
     # Action dimensions: 7 joints + 1 gripper per arm
     left_action_dim: int = 8
     right_action_dim: int = 8
+    arm_command_priority: int = 1
+    arm_action_scale: float = 1.0
+    arm_minimum_time: float = 0.1
 
     state_source: str = "robot"
     state_zmq_address: str | None = None
@@ -62,7 +66,27 @@ def main(args: Args) -> None:
         port=args.port,
     )
     logger = logging.getLogger(__name__)
-    logger.info("Connected to policy server: %s", ws_client_policy.get_server_metadata())
+    server_metadata = ws_client_policy.get_server_metadata()
+    logger.info("Connected to policy server: %s", server_metadata)
+
+    model_horizon = server_metadata.get("action_horizon")
+    action_horizon = args.action_horizon
+    if action_horizon is None:
+        if isinstance(model_horizon, int) and model_horizon > 0:
+            action_horizon = model_horizon
+        else:
+            action_horizon = 50
+            logger.warning(
+                "No action_horizon in metadata; falling back to %s. "
+                "Set --action-horizon explicitly if needed.",
+                action_horizon,
+            )
+    elif isinstance(model_horizon, int) and model_horizon > 0 and model_horizon != action_horizon:
+        logger.warning(
+            "Action horizon mismatch (client=%s, server metadata=%s).",
+            action_horizon,
+            model_horizon,
+        )
 
     env = _env.RBY1Environment(
         robot_ip=args.robot_ip,
@@ -77,6 +101,9 @@ def main(args: Args) -> None:
         cam_right_serial=args.cam_right_serial,
         left_action_dim=args.left_action_dim,
         right_action_dim=args.right_action_dim,
+        arm_command_priority=args.arm_command_priority,
+        arm_action_scale=args.arm_action_scale,
+        arm_minimum_time=args.arm_minimum_time,
         state_source=args.state_source,
         state_zmq_address=args.state_zmq_address,
         state_indices=args.state_indices,
@@ -90,7 +117,7 @@ def main(args: Args) -> None:
             agent=_policy_agent.PolicyAgent(
                 policy=action_chunk_broker.ActionChunkBroker(
                     policy=ws_client_policy,
-                    action_horizon=args.action_horizon,
+                    action_horizon=action_horizon,
                 )
             ),
             subscribers=[],

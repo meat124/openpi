@@ -114,7 +114,7 @@ class Rby1Inputs(transforms.DataTransformFn):
         image_masks = {
             "base_0_rgb": np.True_,
             "left_wrist_0_rgb": np.True_,
-            "right_wrist_0_rgb": np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_,
+            "right_wrist_0_rgb": np.True_,
         }
 
         state = np.asarray(data["observation/state"])
