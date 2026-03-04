@@ -55,6 +55,10 @@ class Args:
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
 
+    # Override checkpoint directory for RBY1 (shortcut: used when env=rby1 and policy=Default).
+    # e.g. "/home/hyunjin/rby1_ws/openpi/checkpoints/pi05_rby1/PuttingCupintotheDishV2/29999"
+    rby1_checkpoint_dir: str | None = None
+
 
 # Default checkpoints that should be used for each environment.
 DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
@@ -98,6 +102,13 @@ def create_policy(args: Args) -> _policy.Policy:
                 _config.get_config(args.policy.config), args.policy.dir, default_prompt=args.default_prompt
             )
         case Default():
+            # If RBY1 env and rby1_checkpoint_dir is provided, override the default checkpoint dir.
+            if args.env == EnvMode.RBY1 and args.rby1_checkpoint_dir is not None:
+                checkpoint = DEFAULT_CHECKPOINT[EnvMode.RBY1]
+                checkpoint = dataclasses.replace(checkpoint, dir=args.rby1_checkpoint_dir)
+                return _policy_config.create_trained_policy(
+                    _config.get_config(checkpoint.config), checkpoint.dir, default_prompt=args.default_prompt
+                )
             return create_default_policy(args.env, default_prompt=args.default_prompt)
 
 
@@ -111,7 +122,11 @@ def main(args: Args) -> None:
         policy_loader = "explicit_checkpoint"
     else:
         served_checkpoint = DEFAULT_CHECKPOINT[args.env]
-        policy_loader = "default_for_env"
+        if args.env == EnvMode.RBY1 and args.rby1_checkpoint_dir is not None:
+            served_checkpoint = dataclasses.replace(served_checkpoint, dir=args.rby1_checkpoint_dir)
+            policy_loader = "rby1_override"
+        else:
+            policy_loader = "default_for_env"
 
     policy_metadata.setdefault("served_env", args.env.value)
     policy_metadata.setdefault("policy_loader", policy_loader)
