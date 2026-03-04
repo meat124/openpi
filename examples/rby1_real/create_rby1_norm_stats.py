@@ -1,9 +1,11 @@
-"""Generate quantile normalization stats for RBY1 (16-dim state/action).
+"""Generate quantile normalization stats for RBY1 (26-dim state/action).
 
 Creates norm_stats for OpenPI policy server from H5 trajectory data.
+Expects H5 files with structure: samples/{robot_position, gripper_state,
+robot_target_joints, gripper_target}. Supports nested episode directories.
 
 Usage:
-    python create_rby1_norm_stats.py --data-dir /path/to/h5_files --output-dir assets/rby1
+    uv run python create_rby1_norm_stats.py --data-dir /path/to/episodes --output-dir assets/rby1
 """
 
 import argparse
@@ -22,25 +24,37 @@ except ImportError:
 
 
 def load_h5_data(h5_files: List[Path], include_gripper: bool = True) -> Dict[str, np.ndarray]:
-    """Load state and action data from H5 files."""
+    """Load state and action data from H5 files.
+    
+    Supports two H5 layouts:
+      - Flat: robot_position, gripper_state, target_position/action, gripper_target at root
+      - Grouped (RBY1 raw): samples/{robot_position, gripper_state,
+                             robot_target_joints, gripper_target}
+    """
     states = []
     actions = []
     
     print(f"Loading {len(h5_files)} H5 files...")
     
     for h5_file in h5_files:
-        print(f"  {h5_file.name}...", end=" ")
+        print(f"  {'/'.join(h5_file.parts[-2:])}...", end=" ")
         try:
             with h5py.File(h5_file, 'r') as f:
-                # Load robot position (14 joints)
-                if 'robot_position' not in f:
+                # Detect layout: grouped (samples/) or flat
+                if 'samples' in f:
+                    grp = f['samples']
+                else:
+                    grp = f
+
+                # Load robot position (24 joints for RBY1)
+                if 'robot_position' not in grp:
                     print("missing 'robot_position', skipped")
                     continue
-                robot_pos = f['robot_position'][:]
+                robot_pos = grp['robot_position'][:]
                 
                 # Append gripper state if requested (2 values)
-                if include_gripper and 'gripper_state' in f:
-                    gripper_state = f['gripper_state'][:]
+                if include_gripper and 'gripper_state' in grp:
+                    gripper_state = grp['gripper_state'][:]
                     state = np.concatenate([robot_pos, gripper_state], axis=-1)
                 else:
                     state = robot_pos
@@ -49,19 +63,24 @@ def load_h5_data(h5_files: List[Path], include_gripper: bool = True) -> Dict[str
                 
                 states.append(state)
                 
-                # Load actions
-                action_key = 'target_position' if 'target_position' in f else 'action'
-                if action_key in f:
-                    robot_action = f[action_key][:]
+                # Load actions: robot_target_joints > target_position > action
+                for action_key in ('robot_target_joints', 'target_position', 'action'):
+                    if action_key in grp:
+                        break
+                else:
+                    action_key = None
+
+                if action_key is not None:
+                    robot_action = grp[action_key][:]
                     
-                    if include_gripper and 'gripper_target' in f:
-                        gripper_action = f['gripper_target'][:]
+                    if include_gripper and 'gripper_target' in grp:
+                        gripper_action = grp['gripper_target'][:]
                         action = np.concatenate([robot_action, gripper_action], axis=-1)
                     else:
                         action = robot_action
                     
                     actions.append(action)
-                    print(f"✓ ({state.shape[0]} steps)")
+                    print(f"✓ ({state.shape[0]} steps, state={state.shape[1]}d, action={action.shape[1]}d)")
                 else:
                     print(f"no actions")
                     
@@ -90,11 +109,10 @@ def compute_normalization_stats(data: np.ndarray, name: str) -> Any:
     """Compute quantile normalization statistics."""
     print(f"\nComputing {name} stats (dim={data.shape[-1]})...")
     
-    accumulator = normalize.Accumulator(vector_length=data.shape[-1])
-    for sample in data:
-        accumulator.add(sample)
+    running_stats = normalize.RunningStats()
+    running_stats.update(data)
     
-    stats = accumulator.get_statistics()
+    stats = running_stats.get_statistics()
     print(f"  ✓ Mean: {stats.mean[:3]}...")
     print(f"  ✓ Q01:  {stats.q01[:3]}...")
     print(f"  ✓ Q99:  {stats.q99[:3]}...")
@@ -127,7 +145,7 @@ def main():
     parser = argparse.ArgumentParser(description="Create RBY1 normalization stats for OpenPI")
     parser.add_argument("--data-dir", type=str, required=True, help="Directory with H5 files")
     parser.add_argument("--output-dir", type=str, default="assets/rby1", help="Output directory")
-    parser.add_argument("--pattern", type=str, default="*.h5", help="File pattern")
+    parser.add_argument("--pattern", type=str, default="**/*.h5", help="File glob pattern (supports ** for recursion)")
     parser.add_argument("--include-gripper", action="store_true", default=True, help="Include gripper")
     
     args = parser.parse_args()
@@ -137,7 +155,7 @@ def main():
         print(f"Error: {data_dir} not found")
         sys.exit(1)
     
-    h5_files = sorted(data_dir.glob(args.pattern))
+    h5_files = sorted(data_dir.glob(args.pattern) if '**' not in args.pattern else data_dir.rglob(args.pattern.replace('**/', '').replace('**', '*.h5')))
     if not h5_files:
         print(f"Error: No H5 files in {data_dir}")
         sys.exit(1)

@@ -357,37 +357,52 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         
 @dataclasses.dataclass(frozen=True)
 class LeRobotRby1DataConfig(DataConfigFactory):
-    """Example data config for an RBY1 dataset in LeRobot format.
+    """Data config for an RBY1 dataset in LeRobot v2.1 format.
 
     This config mirrors the pattern used by `LeRobotLiberoDataConfig`:
     - `repack_transforms` renames dataset keys to the *inference-time* keys expected by `rby1_policy.Rby1Inputs`.
     - `data_transforms` converts those keys into the model's common input format (images/state/prompt).
 
-    You must update the repack mapping to match your dataset schema.
+    Dataset schema (LeRobot v2.1, after export_lerobot_v3_to_v21_openpi_safe.ipynb conversion):
+      head_image        : (3, 224, 224) uint8  — head camera (fixed-size nested list in parquet)
+      left_wrist_image  : (3, 224, 224) uint8  — left wrist (zeros if not collected)
+      right_wrist_image : (3, 224, 224) uint8  — right wrist (zeros if not collected)
+      state             : (16,) float32        — robot_position[8:22] ++ gripper_state
+      actions           : (16,) float32        — robot_target_joints[8:22] ++ gripper_target (alias of `action`)
+      task_index        : int                  — used by PromptFromLeRobotTask → "prompt"
+      prompt            : str                  — default 'unknown'; overwritten by PromptFromLeRobotTask
     """
 
-    # Action keys that will be used to read the action sequence from the dataset.
+    # LeRobot v2.1 export stores actions in a column named "actions" (plural alias of "action").
     action_sequence_keys: Sequence[str] = ("actions",)
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
-        # Repack transforms: dataset keys -> inference keys.
-        # TODO: Update these paths to match your dataset.
+        # Repack transforms: LeRobot v2.1 dataset column names → inference-time keys expected by Rby1Inputs.
+        #
+        # Key rules:
+        #   - dict key   : output key name fed into Rby1Inputs
+        #   - dict value : source key in the flat v2.1 sample dict (short names, no dot-separator)
+        #
+        # The dataset has only a single head camera.  We duplicate it for the two wrist slots so
+        # that Rby1Inputs (which unconditionally reads all three image keys) does not raise a KeyError.
+        # Training with three identical head images is suboptimal but avoids crashes; replace with real
+        # wrist images once wrist camera data is collected.
         repack_transforms = _transforms.Group(
-                inputs=[
-                    _transforms.RepackTransform(
-                        {
-                            "observation/head_image": "head_image", # TODO : dataset에 맞게 고칠 것
-                            "observation/left_wrist_image": "left_wrist_image", # TODO : dataset에 맞게 고칠 것
-                            "observation/right_wrist_image": "right_wrist_image", # TODO : dataset에 맞게 고칠 것
-                            "observation/state": "state",
-                            "actions": "actions",
-                            "prompt": "prompt",
-                        }
-                    )
-                ]
-            )
-        
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/head_image":        "head_image",        # v2.1 short key
+                        "observation/left_wrist_image":  "left_wrist_image",  # v2.1 short key (zeros if not collected)
+                        "observation/right_wrist_image": "right_wrist_image", # v2.1 short key (zeros if not collected)
+                        "observation/state":             "state",             # v2.1 short key (not "observation.state")
+                        "actions":                       "actions",           # v2.1: plural column "actions"
+                        "prompt":                        "prompt",            # PromptFromLeRobotTask가 task_index → str 변환 후 주입
+                    }
+                )
+            ]
+        )
+
         data_transforms = _transforms.Group(
             inputs=[rby1_policy.Rby1Inputs(model_type=model_config.model_type)],
             outputs=[rby1_policy.Rby1Outputs()],
@@ -401,6 +416,9 @@ class LeRobotRby1DataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=self.action_sequence_keys,
+            # task 메타데이터(task_index)로부터 language prompt를 로드한다.
+            # 이 플래그가 False이면 학습 중 prompt 키가 존재하지 않아 모델이 언어 없이 학습된다.
+            prompt_from_task=True,
         )
 
 
@@ -611,7 +629,7 @@ _CONFIGS = [
         name="pi05_rby1",
         model=pi0_config.Pi0Config(pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         data=LeRobotRby1DataConfig(
-            repo_id="edipark/PuttingCupintotheDishV2",  # TODO
+            repo_id="meat000124/PuttingCupintotheDishV2",  # TODO
             assets=AssetsConfig(asset_id="rby1"),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
