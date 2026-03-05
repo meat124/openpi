@@ -1,9 +1,20 @@
 import json
+import logging
 import pathlib
 
 import numpy as np
 import numpydantic
 import pydantic
+
+# Minimum q99-q01 range enforced when computing normalization statistics.
+#
+# When a dimension has a near-zero range (e.g. a robot joint that never moves
+# across all training episodes), the quantile normalization formula
+#   (x - q01) / (q99 - q01 + 1e-6) * 2 - 1
+# amplifies tiny deviations by ~1/(q99-q01), producing astronomically large
+# normalized values and training loss.  Any dimension whose q99-q01 is below
+# this threshold is widened to 1.0 (centered on the mean) before saving.
+_MIN_NORM_RANGE: float = 0.05
 
 
 @pydantic.dataclasses.dataclass
@@ -83,6 +94,24 @@ class RunningStats:
         variance = self._mean_of_squares - self._mean**2
         stddev = np.sqrt(np.maximum(0, variance))
         q01, q99 = self._compute_quantiles([0.01, 0.99])
+
+        # Enforce minimum range to prevent normalization explosion.
+        range_ = q99 - q01
+        narrow = range_ < _MIN_NORM_RANGE
+        if np.any(narrow):
+            narrow_dims = np.where(narrow)[0].tolist()
+            logging.warning(
+                "Near-constant dimension(s) detected in normalization stats: dims %s "
+                "have q99-q01 < %.3f (narrowest=%.2e). Widening to range=1.0 centered "
+                "on the mean. This typically means those joints did not move during "
+                "data collection.",
+                narrow_dims,
+                _MIN_NORM_RANGE,
+                float(range_[narrow].min()),
+            )
+            q01 = np.where(narrow, self._mean - 0.5, q01)
+            q99 = np.where(narrow, self._mean + 0.5, q99)
+
         return NormStats(mean=self._mean, std=stddev, q01=q01, q99=q99)
 
     def _adjust_histograms(self):

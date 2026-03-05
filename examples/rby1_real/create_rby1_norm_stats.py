@@ -113,7 +113,13 @@ def load_h5_data(h5_files: List[Path], include_gripper: bool = True) -> Dict[str
 
 
 def compute_normalization_stats(data: np.ndarray, name: str) -> Any:
-    """Compute quantile normalization statistics."""
+    """Compute quantile normalization statistics.
+
+    Near-constant dimensions (q99-q01 < 0.05) are automatically widened to
+    range=1.0 centered on the mean by RunningStats.get_statistics().  This
+    prevents the quantile normalization formula from amplifying tiny deviations
+    by ~1/range and causing astronomically high training loss.
+    """
     print(f"\nComputing {name} stats (dim={data.shape[-1]})...")
     
     running_stats = normalize.RunningStats()
@@ -123,6 +129,16 @@ def compute_normalization_stats(data: np.ndarray, name: str) -> Any:
     print(f"  ✓ Mean: {stats.mean[:3]}...")
     print(f"  ✓ Q01:  {stats.q01[:3]}...")
     print(f"  ✓ Q99:  {stats.q99[:3]}...")
+
+    # Log any widened dimensions so the caller is aware.
+    import logging
+    range_ = stats.q99 - stats.q01
+    narrow_dims = [i for i, r in enumerate(range_) if r <= 1.0 + 1e-6 and r >= 1.0 - 1e-6
+                   and abs(stats.mean[i] - (stats.q01[i] + stats.q99[i]) / 2) < 1e-4]
+    # Simpler check: dimensions that were exactly widened to 1.0
+    widened = [i for i, r in enumerate(range_) if abs(r - 1.0) < 1e-6]
+    if widened:
+        print(f"  ⚠ Dims {widened} were near-constant and widened to range=1.0 (stationary joints)")
     
     return stats
 

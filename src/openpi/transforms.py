@@ -122,6 +122,7 @@ class Normalize(DataTransformFn):
     def __post_init__(self):
         if self.norm_stats is not None and self.use_quantiles:
             _assert_quantile_stats(self.norm_stats)
+            _warn_narrow_ranges(self.norm_stats)
 
     def __call__(self, data: DataDict) -> DataDict:
         if self.norm_stats is None:
@@ -457,4 +458,31 @@ def _assert_quantile_stats(norm_stats: at.PyTree[NormStats]) -> None:
         if v.q01 is None or v.q99 is None:
             raise ValueError(
                 f"quantile stats must be provided if use_quantile_norm is True. Key {k} is missing q01 or q99."
+            )
+
+
+def _warn_narrow_ranges(norm_stats: at.PyTree[NormStats], min_range: float = 0.05) -> None:
+    """Warn if any norm stats dimension has a near-zero q99-q01 range.
+
+    Such dimensions cause quantile normalization to amplify tiny deviations by
+    ~1/range, producing astronomically large normalized values and training loss.
+    Fix by re-running compute_norm_stats.py (openpi now enforces a minimum range
+    automatically in RunningStats.get_statistics()).
+    """
+    import logging
+
+    for k, v in flatten_dict(norm_stats).items():
+        if v.q01 is None or v.q99 is None:
+            continue
+        range_ = np.asarray(v.q99) - np.asarray(v.q01)
+        narrow = np.where(range_ < min_range)[0]
+        if len(narrow) > 0:
+            logging.warning(
+                "Norm stats key '%s' has near-constant dims %s (q99-q01=%.2e < %.2f). "
+                "Quantile normalization will produce unstable training. "
+                "Re-run compute_norm_stats.py to regenerate with minimum-range enforcement.",
+                k,
+                narrow.tolist(),
+                float(range_[narrow].min()),
+                min_range,
             )
