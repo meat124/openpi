@@ -1,8 +1,11 @@
-"""Generate quantile normalization stats for RBY1 (26-dim state/action).
+"""Generate quantile normalization stats for RBY1 (16-dim state/action).
 
 Creates norm_stats for OpenPI policy server from H5 trajectory data.
 Expects H5 files with structure: samples/{robot_position, gripper_state,
 robot_target_joints, gripper_target}. Supports nested episode directories.
+
+Note: Uses robot_position[8:22] (14 arm joints) + gripper_state (2) = 16-dim
+to match the data conversion pipeline (data_conversion.ipynb).
 
 Usage:
     uv run python create_rby1_norm_stats.py --data-dir /path/to/episodes --output-dir assets/rby1
@@ -51,6 +54,8 @@ def load_h5_data(h5_files: List[Path], include_gripper: bool = True) -> Dict[str
                     print("missing 'robot_position', skipped")
                     continue
                 robot_pos = grp['robot_position'][:]
+                # Slice to arm joints [8:22] (14-dim) to match data conversion
+                robot_pos = robot_pos[:, 8:22]
                 
                 # Append gripper state if requested (2 values)
                 if include_gripper and 'gripper_state' in grp:
@@ -72,6 +77,8 @@ def load_h5_data(h5_files: List[Path], include_gripper: bool = True) -> Dict[str
 
                 if action_key is not None:
                     robot_action = grp[action_key][:]
+                    # Slice to arm joints [8:22] (14-dim) to match data conversion
+                    robot_action = robot_action[:, 8:22]
                     
                     if include_gripper and 'gripper_target' in grp:
                         gripper_action = grp['gripper_target'][:]
