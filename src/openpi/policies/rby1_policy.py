@@ -111,10 +111,12 @@ class Rby1Inputs(transforms.DataTransformFn):
             "right_wrist_0_rgb": right_wrist_image,
         }
 
+        # Set mask to False for zero-filled images (i.e. cameras not collected).
+        # This prevents the model from treating blank frames as valid observations.
         image_masks = {
             "base_0_rgb": np.True_,
-            "left_wrist_0_rgb": np.True_,
-            "right_wrist_0_rgb": np.True_,
+            "left_wrist_0_rgb": np.bool_(left_wrist_image.any()),
+            "right_wrist_0_rgb": np.bool_(right_wrist_image.any()),
         }
 
         state = np.asarray(data["observation/state"])
@@ -151,7 +153,7 @@ class Rby1Outputs(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         # Only return the first N actions -- since we padded actions above to fit the model action
         # dimension, we need to now parse out the correct number of actions in the return dict.
-        # For RBY1, we only return the first 24 actions (since the rest is padding).
+        # For RBY1, we only return the first 16 actions (14 arm joints + 2 grippers; the rest is padding).
         # For your own dataset, replace `16` with the action dimension of your dataset.
         return {"actions": data["actions"][:, :16]}
 
