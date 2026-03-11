@@ -67,6 +67,7 @@ class _RealsenseCamera:
                         connected_serials.append(dev.get_info(rs.camera_info.serial_number))
                     except Exception:
                         continue
+                del ctx  # 파이프라인 시작 전 context 명시적 해제
             except Exception:
                 connected_serials = []
 
@@ -79,33 +80,31 @@ class _RealsenseCamera:
                 # Stop any existing pipeline before starting
                 try:
                     self._pipeline.stop()
-                except RuntimeError:
+                except Exception:
                     pass  # Pipeline wasn't running
                 
                 self._pipeline.start(self._config)
-                
+                self._started = True  # pipeline 시작 즉시 표시 (warmup 중 interrupt 시에도 stop() 동작)
+
                 # Warmup: discard initial frames for stable image quality
                 for _ in range(30):
                     self._pipeline.wait_for_frames(timeout_ms=1000)
 
-                self._started = True
-
-                    
             except Exception as e:
                 logger.warning("Camera start/warmup failed for %s: %s", self._serial, e)
-                self._started = False
                 # Ensure pipeline is stopped on failure
                 try:
                     self._pipeline.stop()
-                except RuntimeError:
+                except Exception:
                     pass
+                self._started = False
                 raise RuntimeError(f"Failed to start camera {self._serial}: {e}") from e
 
     def stop(self) -> None:
         if self._started:
             try:
                 self._pipeline.stop()
-            except RuntimeError:
+            except Exception:
                 pass
             finally:
                 self._started = False
@@ -226,13 +225,23 @@ class RBY1Environment(_environment.Environment):
         }
 
         logger.info("Starting cameras...")
-        for name, cam in self._cameras.items():
-            try:
-                cam.start()
-                logger.info("Camera %s started.", name)
-            except Exception as exc:
-                logger.error("Failed to start camera %s: %s", name, exc)
-                raise
+        try:
+            for name, cam in self._cameras.items():
+                try:
+                    cam.start()
+                    logger.info("Camera %s started.", name)
+                except Exception as exc:
+                    logger.error("Failed to start camera %s: %s", name, exc)
+                    raise
+        except BaseException:
+            # 초기화 도중 예외(KeyboardInterrupt 포함) 발생 시
+            # 이미 start()된 카메라들을 모두 정리하고 re-raise
+            for cam in self._cameras.values():
+                try:
+                    cam.stop()
+                except Exception:
+                    pass
+            raise
 
         # Connect to robot
         self._robot = robot if robot is not None else self._create_robot(robot_ip)
@@ -532,6 +541,12 @@ class RBY1Environment(_environment.Environment):
                 logger.warning("[send] failed to read q after command: %s", exc)
 
         logger.debug("Commands sent to robot")
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def close(self) -> None:
         if self._gripper is not None:
