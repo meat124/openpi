@@ -167,7 +167,7 @@ def save_normalization_stats(output_dir: Path, state_stats: Any, action_stats: A
 def main():
     parser = argparse.ArgumentParser(description="Create RBY1 normalization stats for OpenPI")
     parser.add_argument("--data-dir", type=str, required=True, help="Directory with H5 files")
-    parser.add_argument("--output-dir", type=str, default="assets/rby1", help="Output directory")
+    parser.add_argument("--output-dir", type=str, default="assets/pi05_rby1/rby1", help="Output directory")
     parser.add_argument("--pattern", type=str, default="**/*.h5", help="File glob pattern (supports ** for recursion)")
     parser.add_argument("--include-gripper", action="store_true", default=True, help="Include gripper")
     
