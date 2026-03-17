@@ -34,8 +34,8 @@ class Args:
     prompt: str = "pick up the object"
 
     # Camera serials
-    cam_head_serial: str | None = "922612070040"
-    cam_left_serial: str | None = "838212070714"
+    cam_head_serial: str | None = "838212070714"
+    cam_left_serial: str | None = "922612070040"
     cam_right_serial: str | None = "838212074317"
 
     # Camera settings

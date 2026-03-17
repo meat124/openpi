@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Camera serials from config.yaml
 CAMERAS = {
-    "cam_head": "922612070040",
-    "cam_left_wrist": "838212070714", 
+    "cam_head": "838212070714",
+    "cam_left_wrist": "922612070040",
     "cam_right_wrist": "838212074317",
 }
 

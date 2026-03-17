@@ -21,8 +21,8 @@ uv run scripts/serve_policy.py --env RBY1
 ```
 python examples/rby1_real/main.py \
   --robot-ip 192.168.0.10 \
-  --cam-head-serial 922612070040 \
-  --cam-left-serial 838212070714 \
+  --cam-head-serial 838212070714 \
+  --cam-left-serial 922612070040 \
   --cam-right-serial 838212074317
 ```
 
