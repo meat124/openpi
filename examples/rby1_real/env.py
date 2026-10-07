@@ -210,12 +210,12 @@ class RBY1Environment(_environment.Environment):
                 height=camera_height,
                 fps=camera_fps,
             ),
-            "observation/left_wrist_image": _RealsenseCamera(
-                serial=cam_left_serial,
-                width=camera_width,
-                height=camera_height,
-                fps=camera_fps,
-            ),
+            # "observation/left_wrist_image": _RealsenseCamera(
+            #     serial=cam_left_serial,
+            #     width=camera_width,
+            #     height=camera_height,
+            #     fps=camera_fps,
+            # ),
             "observation/right_wrist_image": _RealsenseCamera(
                 serial=cam_right_serial,
                 width=camera_width,

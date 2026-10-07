@@ -641,6 +641,23 @@ _CONFIGS = [
         # Turn off EMA for LoRA finetuning.
         ema_decay=None,
     ),
+    TrainConfig(
+        name="pi05_rby1_put_carrot",
+        model=pi0_config.Pi0Config(pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        data=LeRobotRby1DataConfig(
+            repo_id="nengjanggo/Put_the_carrot_into_the_plate",
+            assets=AssetsConfig(asset_id="rby1"),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=10000,
+        save_interval=1000,
+        policy_metadata={"action_horizon": 50},
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA finetuning.
+        ema_decay=None,
+    ),
     #
     # Inference Aloha configs.
     #

@@ -8,7 +8,7 @@ remote_gripper_timeout: 10
 cameras:
   head:
     namespace: "camera"
-    serial: "922612070040"
+    serial: "838212070714"
     color: "/camera/camera/color/image_raw"
     depth: "/camera/camera/depth/image_rect_raw"
   right:
@@ -16,11 +16,11 @@ cameras:
     serial: "838212074317"
     color: "/camera3/camera/color/image_raw"
     depth: "/camera3/camera/depth/image_rect_raw"
-  left:
-    namespace: "camera2"
-    serial: "838212070714"
-    color: "/camera2/camera/color/image_raw"
-    depth: "/camera2/camera/depth/image_rect_raw"
+  # left:
+  #   namespace: "camera2"
+  #   serial: "922612070040"
+  #   color: "/camera2/camera/color/image_raw"
+  #   depth: "/camera2/camera/depth/image_rect_raw"
 
 cam_node_num: 3
 
